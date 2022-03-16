@@ -1,9 +1,8 @@
-
 #linebot package
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, PostbackEvent, FollowEvent, UnsendEvent, StickerMessage, ImageMessage, TextMessage, Sender
+    MessageEvent, PostbackEvent, FollowEvent, UnsendEvent, StickerMessage, ImageMessage, TextMessage, MemberJoinedEvent, Sender
     )
 from flask import Flask, request, abort
 #self package
@@ -12,7 +11,6 @@ import _staticdata #資料來源
 import _nickname #轉換遊戲名稱
 import _line_message #常用line-api功能簡化
 import _redis #redis cloud操作
-
 from self_package import (
     game_lottery, game_rank, game_carte, game_crusade, game_kingdom, game_attack, crawler, crawler_selenium, game_pet, game_wolf
     )
@@ -47,6 +45,7 @@ Unsend_list = {}
 member = _staticdata.pd_member()
 push_id = member.index[member['PUSH_MSG'] == 1]
 pet_data = _staticdata.pd_pet()
+northbirds_data = _staticdata.pd_northbirds()
 
 #監聽所有來自 /callback 的 Post Request
 @app.route("/callback", methods=['POST'])
@@ -112,15 +111,18 @@ def reply(event):
     except:
         None   
 #記錄訊息暫存
-    message_log = message_log.append(
+    message_log = pd.concat( [
+        message_log, 
+        pd.DataFrame(
                 {
-            'user_id': event.source.user_id, 
-            'message_id': event.message.id, 
-            'display_name': profile_name,
-            'msg': msg
-            }, 
-            ignore_index=True
-        )  
+            'user_id': [event.source.user_id], 
+            'message_id': [event.message.id], 
+            'display_name': [profile_name],
+            'msg': [msg]
+                }
+            )
+        ]       
+    )
 
 #增加經驗值
     redis_model.update(event, 'Msg')
@@ -235,14 +237,17 @@ def reply(event):
 
 #開始遊戲
     if re.search('開始遊戲', msg):
-        room = game_wolf.create(redis_model)
+        room = game_wolf.create(redis_model, event.source.group_id)
+        if room == False: 
+            message_action.TextMsg(event, '狼人出沒中，上一場遊戲還沒結束~~')
+            return
         game = game_wolf.flex_simulator()
         message_action.FlexMsg(event, '狼人殺開始囉', game.start(room))
         return
 
 #指令:加入王國相關
     if re.search('加入清單', msg):
-        if event.source.user_id not in admin_id and admin_id != []:
+        if event.source.user_id not in admin_id:
            return
         text = 'LINE_UID,LINE_NAME,GAME_NAME\n' 
         for i, j in zip(join_list.keys(), join_list.values()):
@@ -286,23 +291,30 @@ def reply(event):
                   if num == 10: break
               message_action.FlexMsg(event, '抽獎編號-mix', flex_carousel)
               return
+        elif msg == '開始抽獎' :
+            if event.source.user_id not in admin_id:
+              return
+            message_action.MultMsg(push_id, '可以輸入[查看抽獎] 檢視抽獎活動囉')            
         elif game_split[1] in redis_model.game_room:
               player, room, key = game_split[0:3]
               if key == '參加抽獎':
-                  game_lottery.join(redis_model, pool, player)
+                  game_lottery.join(redis_model, room, player)
                   message_action.TextMsg(event, player + '({id})----報名成功'.format(id= room))
                   return
               elif key == '取消抽獎':
-                  game_lottery.cancel(redis_model, pool, player)
+                  game_lottery.cancel(redis_model, room, player)
                   message_action.TextMsg(event, player + '({id})----刪除成功'.format(id= room))
                   return
               elif key == '刪除抽獎':
+                  game_room = redis_model.insert('game_room')
+                  game_room.remove[key]
+                  redis_model.insert('game_room', game_room)
                   redis_model.pop(room)
                   message_action.TextMsg(event, '刪除抽獎活動編號 : ' + room)
-
+                  
   #指令:抽幻獸
     if re.search('抽幻獸', msg):
-        flex = game_pet() 
+        flex = game_pet.flex_simulator()
         message_action.FlexMsg(event, '抽幻獸', flex.menu())
         return
 
@@ -323,7 +335,7 @@ def reply(event):
         return
 
   #指令:代領作業
-    if re.search('/白白', msg):
+    if re.search('/機器人', msg):
         chrome = crawler_selenium.chrome_coupon()
         game_id = redis_model.reply('coupon_ninokuni')
         if re.search('代領序號', msg):
@@ -341,22 +353,41 @@ def reply(event):
             game_id['天鵝']['switch'] = False
             redis_model.insert('coupon_ninokuni', game_id)
             try:
-                message_action.TextMsg(event, '領取成功 :\n------------------n' 
+                message_action.TextMsg(event, '領取成功 :\n------------------\n' 
                     + '\n'.join(chrome.result['OK'])
                     )
             except:
-                message_action.MultMsg(admin_id, '領取成功 :\n------------------n' 
+                message_action.MultMsg(admin_id, '領取成功 :\n------------------\n' 
                     + '\n'.join(chrome.result['OK']) 
                     )
             return
         elif re.search('新增帳號', msg):
             for i in msg.split(' ')[1:]:
-                game_id['天鵝'][id] = []
+                game_id['天鵝'][i] = []
                 redis_model.insert('coupon_ninokuni', game_id)
-            message_action.TextMsg(event, id + '--------新增成功')     
+            message_action.TextMsg(event, '帳號新增成功')     
             return
-        message_action.TextMsg(event, '任務不明!!')     
-        return 
+        elif re.search('投票', msg):
+            room = redis_model.reply('game_wolf')[event.source.group_id]
+            game = redis_model.reply(room)
+            round = list(game['game_turn'].keys())[-1]
+            menu = game_wolf.flex_simulator()
+            if int(round) % 2 == 1:
+                menu.vote(int(round), 'night', game['alive'])
+                message_action.FlexMsg(event, '天黑請閉眼， 狼人出沒中', menu.flex_carousel)      
+            if int(round) % 2 == 0:
+                menu.text['daylight'] = '昨晚死了一個人'
+                menu.vote(round, 'daylight', game['alive'])
+                message_action.FlexMsg(event, '現在是白天', menu.flex_carousel)
+            return
+        elif re.search('我是誰', msg):
+            room = msg.split('-')[0]
+            if room not in redis_model.reply('game_wolf').values() : 
+                message_action.TextMsg(event,'遊戲不存在!')     
+                return
+            game = redis_model.reply(room)
+            message_action.TextMsg(event, game[event.source.user_id])     
+            return
 
   #指令:關鍵字搜圖
     if re.search('.jpg|快樂', msg):
@@ -425,15 +456,12 @@ def Postback_game(event):
         profile_name = profile_user.display_name
     except:
         message_action.TextMsg(event, '請先+好友~')
-    try:
-        redis_model.update(event, 'Postback')
-    except:
-        None
+    redis_model.update(event, 'Postback')
 
 #按鍵:抽幻獸
     if re.search('抽幻獸', key):
         flex = game_pet.flex_simulator()
-        pick = random.choices(list(pet_data.index), weights = pet_data['Probability'], k = int(re.findall('抽幻獸(.*?)抽', val)[0]))
+        pick = random.choices(list(pet_data.index), weights = pet_data['Probability'], k = int(re.findall('抽幻獸(.*?)抽', key)[0]))
         for i in pick :
             flex.flex_carousel['contents'].append(flex.report(player= profile_name, 
                 pet_url= pet_data['Url'][pet_data.index == i][0], pet_name= i))
@@ -442,7 +470,7 @@ def Postback_game(event):
 
 #按鍵:討伐技能
     if re.search('討伐', key) :
-        game = game_crusade.postback(event.postback.data)
+        game = game_crusade.postback(key)
         game_name = profile_name + '({name})'.format(name = _nickname.switch(member, event.source.user_id))
         if game.load(redis_model, game_name) == False :return
         text = game.text(redis_model, event)
@@ -455,7 +483,7 @@ def Postback_game(event):
 
 #按鍵:抽獎功能
     if re.search('抽獎編號', key):
-        game = game_lottery.postback(event.postback.data)
+        game = game_lottery.postback(key)
         if game.load(redis_model) == False :return
         if game.ordr == '名單':
             game.joinlist(message_action, event)
@@ -469,17 +497,73 @@ def Postback_game(event):
         elif game.ordr == '開獎' :
             game.draw(admin_id, redis_model, event, message_action)
             return
-
-#按鍵:點名
-    if re.search('點名', key) :
-        if event.source.user_id not in admin_id:
-            message_action.TextMsg(event, '你不是白白老師~無法使用點名功能~')
-        try:
-            line_uid, game_name = key.split('-')[1:]
-            message_action.PushMsg(line_uid, '白白老師點名中~~點到請舉手~~{game_name}'.format(game_name = game_name))
-            message_action.TextMsg(event, '白白老師點名中~')
-        except:
-            message_action.TextMsg(event, '本月額度已使用完畢無法推播~')
+#狼人殺 postback
+    if re.search('狼人殺', key):
+        if re.search('狼人殺0', key):
+            game = game_wolf.menu(redis_model, key, event, message_action)
+            if game.ordr == '參加':
+                game.join(redis_model, profile_name, event, message_action)
+                return
+            elif game.ordr == '取消' :
+                game.cancel(redis_model, profile_name, event, message_action)
+                return
+        elif re.search('狼人殺1', key):
+            game = game_wolf.role(redis_model, key, event, message_action)
+            if game.ordr == '開始':
+                game.start()
+        elif re.search('投票', key):
+            play, room = event.source.user_id, redis_model.reply('game_wolf')[event.source.group_id]
+            turn, kill = key.split('-')[2:4]
+            game = redis_model.reply(room)
+            action = game_wolf.action(redis_model, room, event, message_action)
+            round = list(game['game_turn'].keys())[-1]
+            if int(turn) != int(round):
+                message_action.TextMsg(event, '誰都沒有辦法回到過去!!!')
+                return
+            menu = game_wolf.flex_simulator()
+            if re.search('投票確認', key):
+                check = action.check(play)
+                if check == 'winner' : return
+                if check == True :
+                    message_action.TextMsg(event, '{play}----神聖的一票 確認洗洗睡!!!'.format(play = play))
+                menu.sleep(redis_model ,room, round, action)
+                message_action.FlexMsg(event, '夕陽西下，處決罪人', menu.flex_carousel)
+                return
+            elif re.search('投票結果', key):
+                menu.vote(int(round) +1, 'night', game['alive'])
+                message_action.FlexMsg(event, '天黑請閉眼， 狼人出沒中', menu.flex_carousel)
+            if int(turn) % 2 == 1:
+                if play in game['werewolves']['wolf'] and play in game['alive']:
+                    wolf = action.wolf(play, kill)
+                    if wolf == 'winner' : return
+                    if wolf == True :
+                        menu = game_wolf.flex_simulator()
+                        menu.text['daylight'] = '小鎮村昨晚\n{name}被吃掉了!!!'.format(name = game['alive'][kill])
+                        menu.vote(int(round) +1, 'daylight', game['alive'])
+                        message_action.FlexMsg(event, '夜晚結束，黎明到來', menu.flex_carousel)
+                    else :
+                        message_action.TextMsg(event, '狼人出沒中，想要吃掉{name}'.format(name = game['alive'][kill]))
+            elif int(turn) % 2 == 0:
+                if key.split('-')[1] == '投票重整':
+                    message_action.FlexMsg(event, '投票確認階段', menu.check(redis_model, room, round))
+                    return
+                vote = action.vote(play, kill)
+                if vote == 'winner': return
+                if play not in game['alive'].keys():
+                    message_action.TextMsg(event, profile_name + ' 不在存活村名清單中')
+                    return
+                if vote == True:
+                    if key.split('-')[1] == '投票改':
+                        message_action.TextMsg(event, '{play1}村民改變主意，想要燒死{name}'.format(play1 = game['alive'][play], name = game['alive'][kill]))
+                        return
+                    message_action.FlexMsg(event, '投票確認階段', menu.check(redis_model, room, round))
+                elif vote == False:
+                    message_action.TextMsg(event, '{play1}已經確認不可以回心轉意'.format(play1 =  game['alive'][play]))
+                elif play == kill:
+                    message_action.TextMsg(event, '{play1}不想燒死其他人，放棄投票'.format(play1 = game['alive'][play]))
+                else:
+                    message_action.TextMsg(event, '{play1}村民投票，想要燒死{name}'.format(play1 = game['alive'][play], name = game['alive'][kill]))
+            return
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

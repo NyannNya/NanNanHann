@@ -1,4 +1,3 @@
-
 import _staticdata
 pet_data = _staticdata.pd_pet()
 
@@ -7,7 +6,7 @@ class flex_simulator():
     def __init__(self) :
         self.flex_carousel = {'contents':[],'type':'carousel'}
         self.image_url = pet_data['Url'][-1]
-        self.theme = '抽幻獸 {name} 活動池'.format(name = pet_data['Name'][-1])
+        self.theme = '抽幻獸 {name} 活動池'.format(name = pet_data.index[-1])
     def base_box(self, layout):
         box = {
             'type': 'box',
@@ -26,7 +25,8 @@ class flex_simulator():
     def button(self, label, data):
         box = {
             'type': 'button',
-            'color' : '#E0E0E0',
+            'style' : 'primary',
+            'color' : '#780000',
             }
         box['action'] = {
             'type': 'postback',
@@ -80,3 +80,4 @@ class flex_simulator():
         flex['body']['contents'].append(add_theme)
         flex['body']['contents'].append(add_box)
         return flex
+

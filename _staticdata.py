@@ -32,3 +32,10 @@ def pd_adjective():
     path = path_join('data', 'adjective.csv')    
     return pd.read_csv(path, header= 0, index_col= None)
 
+def pd_roadname():
+    path = path_join('data', 'roadname.csv')    
+    return pd.read_csv(path, header= 0, index_col= None)
+
+def pd_northbirds():
+    path = path_join('data', 'northbirds.csv')    
+    return pd.read_csv(path, header= 0, index_col= 'episode')

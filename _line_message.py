@@ -1,7 +1,7 @@
 import _account #帳號管理
 from linebot import LineBotApi
 from linebot.models import (
-    TextSendMessage, FlexSendMessage, ImageSendMessage
+    TextSendMessage, FlexSendMessage, ImageSendMessage, VideoSendMessage
     )
 import json
 
@@ -19,7 +19,7 @@ class menu():
                 )
         except:
             None
-    def MultMsg(self,uid, text): 
+    def MultMsg(self, uid, text): 
         try:
             self.line_bot_api.multicast(
                 to = uid,
@@ -28,7 +28,7 @@ class menu():
                 )
         except:
             None
-    def TextMsg(self,event, text, sender= None): 
+    def TextMsg(self, event, text, sender= None): 
         self.line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
@@ -36,7 +36,7 @@ class menu():
                     sender = sender
                 )
             )
-    def FlexMsg(self,event, text, flex): 
+    def FlexMsg(self, event, text, flex): 
         self.line_bot_api.reply_message(
             event.reply_token,
             messages=FlexSendMessage(
@@ -44,7 +44,7 @@ class menu():
                 contents= json.loads(json.dumps(flex, ensure_ascii=False))
                 )
             )
-    def ImageMsg(self,event, URL):
+    def ImageMsg(self, event, URL):
         self.line_bot_api.reply_message(
             event.reply_token,
             ImageSendMessage(
@@ -52,3 +52,11 @@ class menu():
                 preview_image_url = URL
                 )
             ) 
+    def VideoMsg(self, event, image, mp4):
+        self.line_bot_api.reply_message(
+            event.reply_token,
+            VideoSendMessage(
+                preview_image_url = image,
+                original_content_url = mp4
+                )
+            )

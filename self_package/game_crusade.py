@@ -172,7 +172,7 @@ class postback():
             redis_model.update(event, 'Dead', is_mention= True, mention_id= self.boss_id, exp = 0)
             self.load_game['game_end'] = True
         else :
-            boss_message = '野生 {boss} 剩餘生命 活躍中: '.format(boss= self.boss) + format(loss_hp, ',') 
+            boss_message = '野生 {boss} 活躍中 剩餘生命 : '.format(boss= self.boss) + format(loss_hp, ',') 
         obj_end = '碎片' if sidestep == 0 else ''   
         obj = random.choices(star['Star'], weights= star['Per'])[0]+ random.choice(adjective['list']) +'的'+ self.boss + obj_end
         if sidestep == 1:
